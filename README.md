@@ -10,7 +10,7 @@ My automation scripts.
 
 ---
 
-## pardus-etap-vm-setup.sh
+## pardus-vm-setup.sh
 
 Bootstraps and hardens a fresh Pardus ETAP / Debian-based VM in one pass. Built for spinning up disposable VMs quickly.
 
@@ -27,6 +27,15 @@ Bootstraps and hardens a fresh Pardus ETAP / Debian-based VM in one pass. Built 
 9. **open-vm-tools** detects the hypervisor first (`systemd-detect-virt`) and warns/suggests an alternative if it's not VMware, then installs `open-vm-tools` + `open-vm-tools-desktop` and verifies the service, binary, and kernel modules.
 10. 
 ---
+
+### Usage
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Lunixizm0/Scripts/refs/heads/main/pardus-vm-setup.sh)" # run it for real
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Lunixizm0/Scripts/refs/heads/main/pardus-vm-setup.sh)" -- --dry-run # preview every action, change nothing
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/Lunixizm0/Scripts/refs/heads/main/pardus-vm-setup.sh)" -- --help # help
+```
+
 
 ## Notes:
 
