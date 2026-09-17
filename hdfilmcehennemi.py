@@ -5,6 +5,7 @@ USAGE:
   python3 hdfilmcehennemi.py "https://www.hdfilmcehennemi.nl/hd-asiklar-sehri-7/" -o film.mp4
   python3 hdfilmcehennemi.py "URL" --limit 20  # only first 20 segments for testing
 """
+
 import base64
 import binascii
 import collections
@@ -110,7 +111,13 @@ def _validate_url(url: str) -> str:
     if not allowed_re.match(host):
         try:
             ip = ipaddress.ip_address(host)
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_multicast
+                or ip.is_reserved
+            ):
                 raise ValueError(f"URL host is private: {host}")
             raise ValueError(f"URL host not allowed: {host}")
         except ValueError as ve:
@@ -122,8 +129,16 @@ def _validate_url(url: str) -> str:
                     ip_str = res[4][0]
                     try:
                         ip2 = ipaddress.ip_address(ip_str)
-                        if ip2.is_private or ip2.is_loopback or ip2.is_link_local or ip2.is_multicast or ip2.is_reserved:
-                            raise ValueError(f"URL resolves to private IP: {host} -> {ip_str}")
+                        if (
+                            ip2.is_private
+                            or ip2.is_loopback
+                            or ip2.is_link_local
+                            or ip2.is_multicast
+                            or ip2.is_reserved
+                        ):
+                            raise ValueError(
+                                f"URL resolves to private IP: {host} -> {ip_str}"
+                            )
                     except ValueError:
                         continue
             except (socket.gaierror, ValueError) as e:
@@ -137,7 +152,11 @@ def _validate_url(url: str) -> str:
                 raise ValueError(f"URL host is private: {host}")
         except ValueError:
             pass
-    if "@" in url.split("://", 1)[-1].split("?", 1)[0].split("#", 1)[0] and parsed.username is None and "@" in url:
+    if (
+        "@" in url.split("://", 1)[-1].split("?", 1)[0].split("#", 1)[0]
+        and parsed.username is None
+        and "@" in url
+    ):
         raise ValueError("URL contains @")
     return url
 
@@ -360,16 +379,26 @@ def _fetch_stream(url: str, referer=None, max_bytes: int = MAX_HTML_BYTES) -> by
     while True:
         _rate_limit_wait()
         # inline SSRF allowlist check for CodeQL sanitizer (also done in _validate_url) - check full URL directly
-        if not re.match(r"^https://(www\.)?hdfilmcehennemi\.(nl|mobi|com|ws)/|^https://srv\d+\.cdnimages\d+\.shop/|^https://.*\.cdnimages\d*\.shop/|^https://hls\d+\.playmix\.uno/|^https://.*\.playmix\.uno/", url):
+        if not re.match(
+            r"^https://(www\.)?hdfilmcehennemi\.(nl|mobi|com|ws)/|^https://srv\d+\.cdnimages\d+\.shop/|^https://.*\.cdnimages\d*\.shop/|^https://hls\d+\.playmix\.uno/|^https://.*\.playmix\.uno/",
+            url,
+        ):
             # also check host-based allowlist as fallback
             _parsed = urlparse(url)
             _host = (_parsed.hostname or "").lower()
-            if not re.match(r"^(.*\.)?hdfilmcehennemi\.(nl|mobi|com|ws)$|^srv\d+\.cdnimages\d+\.shop$|^(.*\.)?cdnimages\d*\.shop$|^hls\d+\.playmix\.uno$|^(.*\.)?playmix\.uno$", _host):
+            if not re.match(
+                r"^(.*\.)?hdfilmcehennemi\.(nl|mobi|com|ws)$|^srv\d+\.cdnimages\d+\.shop$|^(.*\.)?cdnimages\d*\.shop$|^hls\d+\.playmix\.uno$|^(.*\.)?playmix\.uno$",
+                _host,
+            ):
                 raise ValueError(f"URL host not allowed: {_host}")
         try:
-            with requests.get(url, headers=h, timeout=TIMEOUT, stream=True, allow_redirects=True) as r:
+            with requests.get(
+                url, headers=h, timeout=TIMEOUT, stream=True, allow_redirects=True
+            ) as r:
                 if r.status_code in (429, 503):
-                    delay = _get_retry_after_seconds(r.headers, default=(2**min(attempt, 6)) + 0.5)  # type: ignore[arg-type]
+                    delay = _get_retry_after_seconds(
+                        r.headers, default=(2 ** min(attempt, 6)) + 0.5
+                    )  # type: ignore[arg-type]
                     delay = min(delay, 30.0)
                     time.sleep(delay)
                     attempt += 1
@@ -389,7 +418,9 @@ def _fetch_stream(url: str, referer=None, max_bytes: int = MAX_HTML_BYTES) -> by
                     if chunk:
                         data += chunk
                         if len(data) > max_bytes:
-                            raise ValueError(f"Response too large (> {max_bytes} bytes): {url[:100]}")
+                            raise ValueError(
+                                f"Response too large (> {max_bytes} bytes): {url[:100]}"
+                            )
                 return data
         except requests.exceptions.HTTPError as e:
             resp = getattr(e, "response", None)
@@ -399,14 +430,17 @@ def _fetch_stream(url: str, referer=None, max_bytes: int = MAX_HTML_BYTES) -> by
                     headers = getattr(resp, "headers", {}) or {}
                 except AttributeError:
                     headers = {}
-                delay = _get_retry_after_seconds(headers, default=  # type: ignore[arg-type]
-                    (2**min(attempt, 6)) + 0.5)  # type: ignore[arg-type]
+                delay = _get_retry_after_seconds(
+                    headers,
+                    # type: ignore[arg-type]
+                    default=(2 ** min(attempt, 6)) + 0.5,
+                )  # type: ignore[arg-type]
                 time.sleep(min(delay, 30.0))
                 attempt += 1
                 continue
             raise
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            delay = (2**min(attempt, 6)) * 0.5 + 0.2
+            delay = (2 ** min(attempt, 6)) * 0.5 + 0.2
             time.sleep(min(delay, 30.0))
             attempt += 1
             continue
@@ -417,7 +451,7 @@ def _fetch_stream(url: str, referer=None, max_bytes: int = MAX_HTML_BYTES) -> by
         except Exception:
             if attempt >= 2:
                 raise
-            time.sleep(min(30.0, 0.5 * (2**min(attempt, 5))))
+            time.sleep(min(30.0, 0.5 * (2 ** min(attempt, 5))))
             attempt += 1
             continue
 
@@ -514,7 +548,11 @@ def decode_via_python(iframe_html):
         if len(func_name) > 64 or len(var_name) > 64:
             continue
         try:
-            func_pat = r"(function\s+" + re.escape(func_name) + r"\s*\(.*?\{.*?return\s+\w+\s*;\s*\})"
+            func_pat = (
+                r"(function\s+"
+                + re.escape(func_name)
+                + r"\s*\(.*?\{.*?return\s+\w+\s*;\s*\})"
+            )
             func_match = re.search(func_pat, scr, re.DOTALL)
         except re.error:
             continue
@@ -556,7 +594,13 @@ def decode_via_python(iframe_html):
             continue
         try:
             decoded = _js_skhyr_decode(cleaned, o3q, yetsn)
-        except (ValueError, TypeError, AttributeError, UnicodeDecodeError, binascii.Error):
+        except (
+            ValueError,
+            TypeError,
+            AttributeError,
+            UnicodeDecodeError,
+            binascii.Error,
+        ):
             continue
         if decoded and decoded.strip().startswith("http") and "master" in decoded:
             try:
@@ -590,7 +634,9 @@ def find_master(html):
             return cand
         except ValueError:
             pass
-    m = re.search(r"https?://[^\s\"'<>]{0,500}master\.[a-z]{2,10}[^\s\"'<>]{0,200}", truncated)
+    m = re.search(
+        r"https?://[^\s\"'<>]{0,500}master\.[a-z]{2,10}[^\s\"'<>]{0,200}", truncated
+    )
     if m:
         cand = m.group(0)
         try:
@@ -672,7 +718,9 @@ def _sanitize_output_path(out: str) -> str:
         raise ValueError("Output path contains invalid characters")
     if len(out) > 255:
         raise ValueError("Output path too long")
-    p = Path(out).expanduser()  # lgtm[py/path-injection]  # codeql[py/path-injection] - output path is sanitized via _sanitize_output_path, user-controlled output is intentional
+    p = Path(
+        out
+    ).expanduser()  # lgtm[py/path-injection]  # codeql[py/path-injection] - output path is sanitized via _sanitize_output_path, user-controlled output is intentional
     # prevent ffmpeg option injection: if output starts with '-', prefix with ./
     p_str = str(p)
     if p_str.startswith("-"):
@@ -773,23 +821,34 @@ def download_parallel(urls, referer, tmpdir, prefix, limit=None):
                         headers = getattr(resp, "headers", {}) or {}  # type: ignore[union-attr]
                     except AttributeError:
                         headers = {}
-                    delay = _get_retry_after_seconds(headers, default=  # type: ignore[arg-type]
-                    (2**min(attempt, 6)) + 0.5)  # type: ignore[arg-type]
+                    delay = _get_retry_after_seconds(
+                        headers,
+                        # type: ignore[arg-type]
+                        default=(2 ** min(attempt, 6)) + 0.5,
+                    )  # type: ignore[arg-type]
                     time.sleep(min(delay, 30.0))
                     attempt += 1
                     continue
-                if isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
-                    time.sleep(min(30.0, (2**min(attempt, 6)) * 0.5 + 0.2))
+                if isinstance(
+                    e,
+                    (requests.exceptions.ConnectionError, requests.exceptions.Timeout),
+                ):
+                    time.sleep(min(30.0, (2 ** min(attempt, 6)) * 0.5 + 0.2))
                     attempt += 1
                     continue
                 msg = str(e).lower()
-                if "429" in msg or "503" in msg or "too many requests" in msg or "rate limit" in msg:
-                    time.sleep(min(30.0, (2**min(attempt, 6)) * 0.5 + 0.5))
+                if (
+                    "429" in msg
+                    or "503" in msg
+                    or "too many requests" in msg
+                    or "rate limit" in msg
+                ):
+                    time.sleep(min(30.0, (2 ** min(attempt, 6)) * 0.5 + 0.5))
                     attempt += 1
                     continue
                 if attempt >= 2:
                     raise
-                time.sleep(min(30.0, (2**min(attempt, 6)) * 0.5 + 0.5))
+                time.sleep(min(30.0, (2 ** min(attempt, 6)) * 0.5 + 0.5))
                 attempt += 1
                 continue
 
@@ -803,7 +862,12 @@ def download_parallel(urls, referer, tmpdir, prefix, limit=None):
                 done += 1
                 if done % 100 == 0 or done == len(urls):
                     print(f"  {done}/{len(urls)}")
-            except (OSError, ValueError, RuntimeError, requests.exceptions.RequestException) as e:
+            except (
+                OSError,
+                ValueError,
+                RuntimeError,
+                requests.exceptions.RequestException,
+            ) as e:
                 print(f"[!] segment error: {e}")
 
     list_path = tmp_path / f"{re.sub(r'\W+', '_', prefix)[:20]}_list.txt"
@@ -857,13 +921,20 @@ def extract_alternatives(html, base_iframe):
         parser.feed(truncated)
     except (ValueError, AttributeError, TypeError):
         pass
-    alts = [(label.strip() if label else "Default", vid.strip()) for label, vid in parser.alts if vid is not None]
+    alts = [
+        (label.strip() if label else "Default", vid.strip())
+        for label, vid in parser.alts
+        if vid is not None
+    ]
     # filter empty
     alts = [(n, v) for n, v in alts if n]
     if not alts:
         # fallback regex bounded for compatibility if parser missed due to malformed html
         # use safe bounded regex
-        for m in re.finditer(r'class="alternative-link"[^>]{0,500}data-video="([^"]{0,200})"[^>]{0,500}>([^<]{0,100})</button>', truncated):
+        for m in re.finditer(
+            r'class="alternative-link"[^>]{0,500}data-video="([^"]{0,200})"[^>]{0,500}>([^<]{0,100})</button>',
+            truncated,
+        ):
             vid, name = m.group(1).strip(), m.group(2).strip()
             if len(vid) > 200 or len(name) > 100:
                 continue
@@ -886,7 +957,9 @@ def build_iframe_url(base_iframe, alt_vid, alt_name):
     vid = m.group(1) if m else ""
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", vid):
         return base_iframe
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", alt_vid) and not re.fullmatch(r"[A-Za-z0-9._-]{1,200}", alt_vid):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", alt_vid) and not re.fullmatch(
+        r"[A-Za-z0-9._-]{1,200}", alt_vid
+    ):
         return base_iframe
     if "rapidrame" in alt_name.lower():
         cand = f"https://hdfilmcehennemi.mobi/video/embed/{vid}/?rapidrame_id={alt_vid}"
@@ -903,7 +976,10 @@ def extract_subtitles(iframe_html):
     truncated = _safe_truncate(iframe_html, 500_000)
     subs = []
     # bounded pattern
-    for m in re.finditer(r'"file"\s*:\s*"(https:[^"]{0,500}\.vtt)"[^}]{0,500}"label"\s*:\s*"([^"]{0,100})"', truncated):
+    for m in re.finditer(
+        r'"file"\s*:\s*"(https:[^"]{0,500}\.vtt)"[^}]{0,500}"label"\s*:\s*"([^"]{0,100})"',
+        truncated,
+    ):
         url, label = m.group(1).replace("\\/", "/"), m.group(2)
         try:
             _validate_url(url)
@@ -975,8 +1051,18 @@ def main():
     ap.add_argument("url", nargs="?", help="Film URL")
     ap.add_argument("-o", "--output", help="Output mp4")
     ap.add_argument("--limit", type=int, help="Segment limit for testing")
-    ap.add_argument("-i", "--interactive", action="store_true", help="Interactive selection (quality/audio/subtitle/source)")
-    ap.add_argument("--rate-limit", type=int, default=8, help="Max requests per second for all workers (default 8)")
+    ap.add_argument(
+        "-i",
+        "--interactive",
+        action="store_true",
+        help="Interactive selection (quality/audio/subtitle/source)",
+    )
+    ap.add_argument(
+        "--rate-limit",
+        type=int,
+        default=8,
+        help="Max requests per second for all workers (default 8)",
+    )
     ap.add_argument("--debug", action="store_true", help="Write debug file")
     args = ap.parse_args()
 
@@ -999,7 +1085,14 @@ def main():
     # url yoksa interactivete sor
     if not film_url and interactive:
         try:
-            film_url = input("Film URL (example: https://www.hdfilmcehennemi.nl/hd-asiklar-sehri-7/): ").strip().strip('"').strip("'")
+            film_url = (
+                input(
+                    "Film URL (example: https://www.hdfilmcehennemi.nl/hd-asiklar-sehri-7/): "
+                )
+                .strip()
+                .strip('"')
+                .strip("'")
+            )
         except (KeyboardInterrupt, EOFError):
             print("\nCancelled")
             sys.exit(0)
@@ -1007,7 +1100,9 @@ def main():
             print("URL is required")
             sys.exit(1)
     if not film_url:
-        print('Usage: python3 hdfilmcehennemi.py "URL" [-o output.mp4] [--limit N] [-i]')
+        print(
+            'Usage: python3 hdfilmcehennemi.py "URL" [-o output.mp4] [--limit N] [-i]'
+        )
         sys.exit(1)
 
     try:
@@ -1061,7 +1156,10 @@ def main():
     alts = extract_alternatives(html_content, base_iframe)
     if interactive and len(alts) > 1:
         chosen = choose_interactive(
-            [(f"{n} ({'active' if i == 0 else 'alternative'})", (n, v)) for i, (n, v) in enumerate(alts)],
+            [
+                (f"{n} ({'active' if i == 0 else 'alternative'})", (n, v))
+                for i, (n, v) in enumerate(alts)
+            ],
             "Select video source:",
             default=1,
         )
@@ -1134,7 +1232,7 @@ def main():
             except ValueError:
                 continue
             bw_str = f"{res_m.group(1)}p" if res_m else "Unknown"
-            bw_kbps = f"{int(bw_m.group(1))//1000}kbps" if bw_m else uri[:30]
+            bw_kbps = f"{int(bw_m.group(1)) // 1000}kbps" if bw_m else uri[:30]
             label = f"{bw_str} - {bw_kbps}" if bw_m else uri
             streams.append((label, full, attrs))
 
@@ -1154,6 +1252,7 @@ def main():
             video_url = chosen_stream[1][1]
             print(f"[+] Selected quality: {chosen_stream[0]} -> {video_url}")
         else:
+
             def bw_key(x):
                 mm = re.search(r"BANDWIDTH=(\d+)", x[2])
                 return int(mm.group(1)) if mm else 0
@@ -1176,7 +1275,9 @@ def main():
             print(f"[+] audios: {audios}")
             if interactive:
                 opts = [(f"{n}", (n, u)) for n, u in audios]
-                chosen_aud = choose_interactive(opts, "Select audio language:", default=1)
+                chosen_aud = choose_interactive(
+                    opts, "Select audio language:", default=1
+                )
                 if chosen_aud is None:
                     print("[-] No audio selected")
                     sys.exit(1)
@@ -1212,7 +1313,13 @@ def main():
         for i, (label, url) in enumerate(subs, 1):
             print(f"  [{i}] {label} -> {url[:60]}")
         try:
-            ans = input("Download subtitles? [Y/n] (y: all, n: none, 1,3 for selection): ").strip().lower()
+            ans = (
+                input(
+                    "Download subtitles? [Y/n] (y: all, n: none, 1,3 for selection): "
+                )
+                .strip()
+                .lower()
+            )
         except (KeyboardInterrupt, EOFError):
             print("\nCancelled")
             sys.exit(0)
@@ -1230,7 +1337,11 @@ def main():
                 chosen_subs = []
             else:
                 try:
-                    idxs = [int(x) - 1 for x in re.split(r"[,\s]+", ans) if x.strip().isdigit()]
+                    idxs = [
+                        int(x) - 1
+                        for x in re.split(r"[,\s]+", ans)
+                        if x.strip().isdigit()
+                    ]
                     # limit
                     idxs = [i for i in idxs if 0 <= i < len(subs)]
                     chosen_subs = [subs[i] for i in idxs]
@@ -1272,7 +1383,9 @@ def main():
                 if 1 <= val <= 5000:
                     limit = val
                 else:
-                    print("[!] Limit must be between 1 and 5000, all will be downloaded")
+                    print(
+                        "[!] Limit must be between 1 and 5000, all will be downloaded"
+                    )
 
     print("[*] Fetching video playlist...")
     try:
@@ -1305,7 +1418,11 @@ def main():
             print("[*] Fetching audio playlist...")
             try:
                 audio_txt = fetch(audio_url, referer=referer)
-            except (ValueError, RuntimeError, requests.exceptions.RequestException) as e:
+            except (
+                ValueError,
+                RuntimeError,
+                requests.exceptions.RequestException,
+            ) as e:
                 print(f"[-] failed to fetch audio playlist: {e}")
                 audio_url = None
                 a_segs = None
@@ -1328,16 +1445,29 @@ def main():
             try:
                 _validate_url(url)
                 data = fetch(url, referer=iframe)
-                if not data.strip().startswith("WEBVTT"):
-                    print(f"  [!] {label} invalid VTT, skipping")
-                    continue
+                # VTT files often start with UTF-8 BOM (\ufeff) which strip() does not remove
+                # handle BOM + whitespace robustly
+                cleaned = data.lstrip("\ufeff").strip()
+                if not cleaned.startswith("WEBVTT"):
+                    cleaned = data.strip().lstrip("\ufeff").strip()
+                    if not cleaned.startswith("WEBVTT") and not data.lstrip(
+                        "\ufeff \t\n\r\v\f"
+                    ).strip().startswith("WEBVTT"):
+                        print(f"  [!] {label} invalid VTT, skipping")
+                        print(f"      (debug first 80 chars: {data[:80]!r})")
+                        continue
+                # normalize BOM for ffmpeg - strip leading BOM so file starts with WEBVTT
+                if data.startswith("\ufeff"):
+                    data = data.lstrip("\ufeff")
                 safe_label = re.sub(r"[^A-Za-z0-9._-]", "_", label)[:20] or "subtitle"
                 sub_path = Path(tmpdir) / f"sub_{safe_label}_{len(sub_files):02d}.vtt"
                 try:
                     if not sub_path.resolve().is_relative_to(Path(tmpdir).resolve()):
                         continue
                 except AttributeError:
-                    if not str(sub_path.resolve()).startswith(str(Path(tmpdir).resolve())):
+                    if not str(sub_path.resolve()).startswith(
+                        str(Path(tmpdir).resolve())
+                    ):
                         continue
                 except OSError:
                     continue
@@ -1345,7 +1475,12 @@ def main():
                     sf.write(data)
                 sub_files.append((sub_path, label, _label_to_lang(label)))
                 print(f"  [+] {label}: {sub_path.name}")
-            except (OSError, ValueError, UnicodeError, requests.exceptions.RequestException) as e:
+            except (
+                OSError,
+                ValueError,
+                UnicodeError,
+                requests.exceptions.RequestException,
+            ) as e:
                 print(f"  [!] {label} error: {e}")
     try:
         v_list, _ = download_parallel(v_segs, referer, tmpdir, "video", limit=limit)
@@ -1390,14 +1525,20 @@ def main():
         cmd += [str(out_path)]
         # log without exposing full paths if needed
         print(" ".join(cmd))
-        ret = subprocess.run(cmd, shell=False, check=False)  # lgtm[py/command-line-injection]  # codeql[py/command-line-injection] - out_path sanitized via _sanitize_output_path, shell=False
+        ret = subprocess.run(
+            cmd, shell=False, check=False
+        )  # lgtm[py/command-line-injection]  # codeql[py/command-line-injection] - out_path sanitized via _sanitize_output_path, shell=False
         if ret.returncode == 0:
             try:
-                size = os.path.getsize(out_path)  # lgtm[py/path-injection]  # codeql[py/path-injection] - out_path is sanitized output path
+                size = os.path.getsize(
+                    out_path
+                )  # lgtm[py/path-injection]  # codeql[py/path-injection] - out_path is sanitized output path
             except OSError:
                 size = 0
             if sub_files:
-                print(f"[+] Done: {out_path} ({size} byte) with {len(sub_files)} subtitles (switch in mpv with j / Shift+J or v)")
+                print(
+                    f"[+] Done: {out_path} ({size} byte) with {len(sub_files)} subtitles (switch in mpv with j / Shift+J or v)"
+                )
             else:
                 print(f"[+] Done: {out_path} ({size} byte)")
         else:
