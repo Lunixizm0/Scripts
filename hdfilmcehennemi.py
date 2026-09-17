@@ -914,6 +914,22 @@ def extract_subtitles(iframe_html):
     return subs
 
 
+def _label_to_lang(label: str) -> str:
+    mapping = {
+        "turkish": "tur",
+        "english": "eng",
+        "french": "fra",
+        "portuguese": "por",
+        "spanish": "spa",
+        "forced": "eng",
+        "unknown": "und",
+        "original": "und",
+        "originalaudio": "und",
+    }
+    key = re.sub(r"[^A-Za-z]", "", label).lower()
+    return mapping.get(key, "und")
+
+
 def choose_interactive(options, prompt, default=1):
     if not options:
         return None
@@ -1298,13 +1314,39 @@ def main():
                     a_segs = None
 
     tmpdir = tempfile.mkdtemp(prefix="hdf_")
+    sub_files: list[tuple[Path, str, str]] = []
+    if chosen_subs:
+        print(f"[*] {len(chosen_subs)} subtitles downloading to bundle...")
+        for label, url in chosen_subs:
+            try:
+                _validate_url(url)
+                data = fetch(url, referer=iframe)
+                if not data.strip().startswith("WEBVTT"):
+                    print(f"  [!] {label} invalid VTT, skipping")
+                    continue
+                safe_label = re.sub(r"[^A-Za-z0-9._-]", "_", label)[:20] or "subtitle"
+                sub_path = Path(tmpdir) / f"sub_{safe_label}_{len(sub_files):02d}.vtt"
+                try:
+                    if not sub_path.resolve().is_relative_to(Path(tmpdir).resolve()):
+                        continue
+                except AttributeError:
+                    if not str(sub_path.resolve()).startswith(str(Path(tmpdir).resolve())):
+                        continue
+                except OSError:
+                    continue
+                with open(sub_path, "w", encoding="utf-8") as sf:
+                    sf.write(data)
+                sub_files.append((sub_path, label, _label_to_lang(label)))
+                print(f"  [+] {label}: {sub_path.name}")
+            except (OSError, ValueError, UnicodeError, requests.exceptions.RequestException) as e:
+                print(f"  [!] {label} error: {e}")
     try:
         v_list, _ = download_parallel(v_segs, referer, tmpdir, "video", limit=limit)
         a_list = None
         if a_segs:
             a_list, _ = download_parallel(a_segs, referer, tmpdir, "audio", limit=limit)
 
-        print(f"[*] Merging -> {out}")
+        print(f"[*] Merging -> {out} (with {len(sub_files)} subtitles bundled)")
         # ensure ffmpeg exists
         if shutil.which("ffmpeg") is None:
             print("[-] ffmpeg not found")
@@ -1314,11 +1356,31 @@ def main():
         if out_path.name.startswith("-"):
             out = str(Path(".") / out_path)
             out_path = Path(out)
-        # build cmd with list, no shell
+        # build ffmpeg command with subtitles bundled as mov_text
+        cmd: list[str] = ["ffmpeg", "-y"]
+        cmd += ["-f", "concat", "-safe", "0", "-i", v_list]
         if a_segs and a_list:
-            cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", v_list, "-f", "concat", "-safe", "0", "-i", a_list, "-c", "copy", str(out_path)]
+            cmd += ["-f", "concat", "-safe", "0", "-i", a_list]
+        for sub_path, _, _ in sub_files:
+            cmd += ["-i", str(sub_path)]
+        if a_segs and a_list:
+            cmd += ["-map", "0:v", "-map", "1:a"]
+            sub_offset = 2
         else:
-            cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", v_list, "-c", "copy", str(out_path)]
+            cmd += ["-map", "0:v"]
+            sub_offset = 1
+        for idx in range(len(sub_files)):
+            cmd += ["-map", str(sub_offset + idx)]
+        if sub_files:
+            cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text"]
+        else:
+            cmd += ["-c", "copy"]
+        for idx, (_, label, lang) in enumerate(sub_files):
+            cmd += [f"-metadata:s:s:{idx}", f"language={lang}"]
+            cmd += [f"-metadata:s:s:{idx}", f"title={label}"]
+            if idx == 0:
+                cmd += [f"-disposition:s:{idx}", "default"]
+        cmd += [str(out_path)]
         # log without exposing full paths if needed
         print(" ".join(cmd))
         ret = subprocess.run(cmd, shell=False, check=False)  # lgtm[py/command-line-injection]  # codeql[py/command-line-injection] - out_path sanitized via _sanitize_output_path, shell=False
@@ -1327,33 +1389,10 @@ def main():
                 size = os.path.getsize(out_path)  # lgtm[py/path-injection]  # codeql[py/path-injection] - out_path is sanitized output path
             except OSError:
                 size = 0
-            print(f"[+] Done: {out_path} ({size} byte)")
-            if chosen_subs:
-                print(f"[*] {len(chosen_subs)} downloading subtitles...")
-                for label, url in chosen_subs:
-                    try:
-                        _validate_url(url)
-                        data = fetch(url, referer=iframe)
-                        safe_label = re.sub(r"[^A-Za-z0-9._-]", "_", label)[:20]
-                        if not safe_label:
-                            safe_label = "subtitle"
-                        safe_stem = re.sub(r"[^A-Za-z0-9._-]", "_", out_path.stem)[:100]
-                        if not safe_stem:
-                            safe_stem = "output"
-                        sub_path = out_path.parent / f"{safe_stem}.{safe_label}.vtt"
-                        # validate sub_path is in same dir or subdir of out_path parent
-                        try:
-                            # allow same parent
-                            if not str(sub_path.resolve()).startswith(str(out_path.parent.resolve())):
-                                # fallback to out parent + safe name
-                                sub_path = out_path.parent / f"{out_path.stem}.{safe_label}.vtt"
-                        except OSError:
-                            sub_path = out_path.parent / f"{out_path.stem}.{safe_label}.vtt"
-                        with open(sub_path, "w", encoding="utf-8") as sf:
-                            sf.write(data)
-                        print(f"  [+] {label}: {sub_path}")
-                    except (OSError, ValueError, UnicodeError, requests.exceptions.RequestException) as e:
-                        print(f"  [!] {label} error: {e}")
+            if sub_files:
+                print(f"[+] Done: {out_path} ({size} byte) with {len(sub_files)} subtitles (switch in mpv with j / Shift+J or v)")
+            else:
+                print(f"[+] Done: {out_path} ({size} byte)")
         else:
             print("[-] ffmpeg error")
             sys.exit(1)
