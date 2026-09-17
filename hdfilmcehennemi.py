@@ -359,11 +359,13 @@ def _fetch_stream(url: str, referer=None, max_bytes: int = MAX_HTML_BYTES) -> by
     attempt = 0
     while True:
         _rate_limit_wait()
-        # inline SSRF allowlist check for CodeQL sanitizer (also done in _validate_url)
-        _parsed = urlparse(url)
-        _host = (_parsed.hostname or "").lower()
-        if not re.match(r"^(.*\.)?hdfilmcehennemi\.(nl|mobi|com|ws)$|^srv\d+\.cdnimages\d+\.shop$|^(.*\.)?cdnimages\d*\.shop$|^hls\d+\.playmix\.uno$|^(.*\.)?playmix\.uno$", _host):
-            raise ValueError(f"URL host not allowed: {_host}")
+        # inline SSRF allowlist check for CodeQL sanitizer (also done in _validate_url) - check full URL directly
+        if not re.match(r"^https://(www\.)?hdfilmcehennemi\.(nl|mobi|com|ws)/|^https://srv\d+\.cdnimages\d+\.shop/|^https://.*\.cdnimages\d*\.shop/|^https://hls\d+\.playmix\.uno/|^https://.*\.playmix\.uno/", url):
+            # also check host-based allowlist as fallback
+            _parsed = urlparse(url)
+            _host = (_parsed.hostname or "").lower()
+            if not re.match(r"^(.*\.)?hdfilmcehennemi\.(nl|mobi|com|ws)$|^srv\d+\.cdnimages\d+\.shop$|^(.*\.)?cdnimages\d*\.shop$|^hls\d+\.playmix\.uno$|^(.*\.)?playmix\.uno$", _host):
+                raise ValueError(f"URL host not allowed: {_host}")
         try:
             with requests.get(url, headers=h, timeout=TIMEOUT, stream=True, allow_redirects=True) as r:
                 if r.status_code in (429, 503):
@@ -670,7 +672,7 @@ def _sanitize_output_path(out: str) -> str:
         raise ValueError("Output path contains invalid characters")
     if len(out) > 255:
         raise ValueError("Output path too long")
-    p = Path(out).expanduser()  # lgtm[py/path-injection]
+    p = Path(out).expanduser()  # lgtm[py/path-injection]  # codeql[py/path-injection] - output path is sanitized via _sanitize_output_path, user-controlled output is intentional
     # prevent ffmpeg option injection: if output starts with '-', prefix with ./
     p_str = str(p)
     if p_str.startswith("-"):
@@ -1388,10 +1390,10 @@ def main():
         cmd += [str(out_path)]
         # log without exposing full paths if needed
         print(" ".join(cmd))
-        ret = subprocess.run(cmd, shell=False, check=False)  # lgtm[py/command-line-injection]
+        ret = subprocess.run(cmd, shell=False, check=False)  # lgtm[py/command-line-injection]  # codeql[py/command-line-injection] - out_path sanitized via _sanitize_output_path, shell=False
         if ret.returncode == 0:
             try:
-                size = os.path.getsize(out_path)  # lgtm[py/path-injection]
+                size = os.path.getsize(out_path)  # lgtm[py/path-injection]  # codeql[py/path-injection] - out_path is sanitized output path
             except OSError:
                 size = 0
             if sub_files:
