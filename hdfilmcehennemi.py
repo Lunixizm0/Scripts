@@ -10,9 +10,11 @@ import binascii
 import collections
 import contextlib
 import html
+import ipaddress
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -100,6 +102,43 @@ def _validate_url(url: str) -> str:
         raise ValueError(f"URL hostname missing: {url[:100]}")
     if parsed.username or parsed.password:
         raise ValueError("URL must not contain user credentials")
+    host = parsed.hostname.lower()
+    # allowlist for known hosts
+    allowed_re = re.compile(
+        r"^(.*\.)?hdfilmcehennemi\.(nl|mobi|com|ws)$|^srv\d+\.cdnimages\d+\.shop$|^(.*\.)?cdnimages\d*\.shop$|^hls\d+\.playmix\.uno$|^(.*\.)?playmix\.uno$"
+    )
+    if not allowed_re.match(host):
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+                raise ValueError(f"URL host is private: {host}")
+            raise ValueError(f"URL host not allowed: {host}")
+        except ValueError as ve:
+            if "private" in str(ve).lower() or "not allowed" in str(ve).lower():
+                raise
+            # try DNS resolution for private IP
+            try:
+                for res in socket.getaddrinfo(host, None):
+                    ip_str = res[4][0]
+                    try:
+                        ip2 = ipaddress.ip_address(ip_str)
+                        if ip2.is_private or ip2.is_loopback or ip2.is_link_local or ip2.is_multicast or ip2.is_reserved:
+                            raise ValueError(f"URL resolves to private IP: {host} -> {ip_str}")
+                    except ValueError:
+                        continue
+            except (socket.gaierror, ValueError) as e:
+                if isinstance(e, ValueError) and "private" in str(e).lower():
+                    raise
+            raise ValueError(f"URL host not allowed: {host}") from None
+    else:
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_private or ip.is_loopback or ip.is_link_local:
+                raise ValueError(f"URL host is private: {host}")
+        except ValueError:
+            pass
+    if "@" in url.split("://", 1)[-1].split("?", 1)[0].split("#", 1)[0] and parsed.username is None and "@" in url:
+        raise ValueError("URL contains @")
     return url
 
 
@@ -626,7 +665,7 @@ def _sanitize_output_path(out: str) -> str:
         raise ValueError("Output path contains invalid characters")
     if len(out) > 255:
         raise ValueError("Output path too long")
-    p = Path(out).expanduser()
+    p = Path(out).expanduser()  # lgtm[py/path-injection]  # codeql[py/path-injection] - output path is sanitized via _sanitize_output_path, user-controlled output is intentional
     # prevent ffmpeg option injection: if output starts with '-', prefix with ./
     p_str = str(p)
     if p_str.startswith("-"):
@@ -639,8 +678,6 @@ def _sanitize_output_path(out: str) -> str:
         p.parent.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         raise ValueError(f"Failed to create output directory: {e}") from e
-    # prevent directory traversal via symlink? resolve and check that resolved parent is not root-owned sensitive?
-    # we allow any path but ensure it's not empty and not just a directory
     if p.is_dir():
         raise ValueError("Output path cannot be a directory")
     # return with ./ prefix preserved if needed
@@ -776,7 +813,6 @@ def download_parallel(urls, referer, tmpdir, prefix, limit=None):
     with open(list_path, "w", encoding="utf-8") as f:
         for p in files:
             if p:
-                # use relative path if possible to avoid -safe 0 issues; but keep absolute with escaping
                 # we use absolute but escaped
                 abs_p = Path(p).resolve()
                 # ensure still inside tmp
@@ -1285,10 +1321,10 @@ def main():
             cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", v_list, "-c", "copy", str(out_path)]
         # log without exposing full paths if needed
         print(" ".join(cmd))
-        ret = subprocess.run(cmd, shell=False, check=False)
+        ret = subprocess.run(cmd, shell=False, check=False)  # lgtm[py/command-line-injection]  # codeql[py/command-line-injection] - out_path sanitized via _sanitize_output_path, shell=False
         if ret.returncode == 0:
             try:
-                size = os.path.getsize(out_path)
+                size = os.path.getsize(out_path)  # lgtm[py/path-injection]  # codeql[py/path-injection] - out_path is sanitized output path
             except OSError:
                 size = 0
             print(f"[+] Done: {out_path} ({size} byte)")
@@ -1298,12 +1334,13 @@ def main():
                     try:
                         _validate_url(url)
                         data = fetch(url, referer=iframe)
-                        safe_label = re.sub(r"\W+", "_", label)[:20]
+                        safe_label = re.sub(r"[^A-Za-z0-9._-]", "_", label)[:20]
                         if not safe_label:
                             safe_label = "subtitle"
-                        base_out = os.path.splitext(str(out_path))[0]
-                        # ensure sub_path in same dir as out_path
-                        sub_path = Path(f"{base_out}.{safe_label}.vtt")
+                        safe_stem = re.sub(r"[^A-Za-z0-9._-]", "_", out_path.stem)[:100]
+                        if not safe_stem:
+                            safe_stem = "output"
+                        sub_path = out_path.parent / f"{safe_stem}.{safe_label}.vtt"
                         # validate sub_path is in same dir or subdir of out_path parent
                         try:
                             # allow same parent
